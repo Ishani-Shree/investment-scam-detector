@@ -32,6 +32,15 @@ python predict.py --text "Earn 30% daily, guaranteed! Join Telegram" \
     --url http://bit.ly/x --channel telegram --account-age 4 --payment crypto
 ```
 
+## Web demo
+```bash
+python app.py            # then open http://127.0.0.1:5000
+```
+Paste a message, add the link, upload a screenshot and (optionally) sender details. The page shows
+the fused scam score, a score per input (text / image / sender / link), the scam patterns found in
+the text, and link/sender red flags. It uses `models/scam_detector_real.joblib` if present, otherwise
+the synthetic-data model; pass `--model path.joblib` to choose.
+
 ## Training on public real-world data
 ```bash
 python download_data.py        # ~17 MB into data/raw/ (data files only)
