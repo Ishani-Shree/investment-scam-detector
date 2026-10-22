@@ -39,7 +39,7 @@ class NeuralScamDetector(MultimodalScamDetector):
         self.epochs, self.lr, self.svd_dim = epochs, lr, svd_dim
 
     def _tensors(self, df, fit=False):
-        texts, has_text, _, has_img, img_X, meta_X = self._extract(df)
+        texts, has_text, _, has_img, img_X, meta_X, _ = self._extract(df)
         if fit:
             self.tf_ = TextFeaturizer().fit(texts)
             T = self.tf_.transform(texts)

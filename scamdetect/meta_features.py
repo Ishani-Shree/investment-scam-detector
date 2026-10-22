@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 
 import numpy as np
 
+from .domains import impersonated_brand, is_trusted
+
 SUSPICIOUS_TLDS = {"xyz", "top", "club", "online", "site", "icu", "buzz", "vip", "live", "cc",
                    "shop", "win", "loan", "click", "work", "info", "biz"}
 SHORTENERS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "is.gd", "cutt.ly", "rb.gy", "shorturl.at"}
@@ -14,10 +16,19 @@ CHANNELS = ["telegram", "whatsapp", "sms", "email", "instagram", "facebook", "tw
 PAYMENTS = ["none", "bank", "upi", "card", "crypto", "gift_card"]
 
 
+def url_host(url):
+    """Lower-cased host without scheme/www, used by the character-level URL model."""
+    url = (url or "").strip()
+    if not url:
+        return ""
+    host = (urlparse(url if "://" in url else "http://" + url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def url_features(url):
     url = (url or "").strip()
     if not url:
-        return [0.0] * 11
+        return [0.0] * 13
     p = urlparse(url if "://" in url else "http://" + url)
     host = (p.hostname or "").lower()
     tld = host.rsplit(".", 1)[-1] if "." in host else ""
@@ -33,6 +44,8 @@ def url_features(url):
         host.count("-"),
         sum(w in host for w in LURE_WORDS),
         float("@" in url or "//" in p.path),
+        float(is_trusted(host)),
+        float(bool(impersonated_brand(host))),
     ]
 
 
@@ -66,6 +79,9 @@ def meta_flags(row):
     flags = []
     f = url_features(row.get("url"))
     if f[0]:
+        host = url_host(row.get("url"))
+        if f[11]: flags.append(f"official domain ({host})")
+        if f[12]: flags.append(f"domain uses brand '{impersonated_brand(host)}' but is not its official site")
         if f[4]: flags.append("URL uses a link shortener")
         if f[5]: flags.append("URL has a suspicious TLD")
         if f[3]: flags.append("URL is a raw IP address")

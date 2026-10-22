@@ -9,21 +9,34 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .domains import impersonated_brand, is_trusted
 from .image_features import dhash, hamming, image_vector, ocr_text
-from .meta_features import meta_flags, meta_vector
+from .meta_features import meta_flags, meta_vector, url_host
 from .text_features import TextFeaturizer, find_patterns
 
-MODALITIES = ["text", "image", "meta"]
+MODALITIES = ["text", "image", "meta", "url"]
 
 
 def _has_image(p):
     return isinstance(p, str) and p.strip() != "" and os.path.exists(p)
+
+
+def _url_rules(hosts, p):
+    """Allowlist / impersonation override on top of the learned URL score."""
+    p = p.copy()
+    for i, h in enumerate(hosts):
+        if is_trusted(h):
+            p[i] = min(p[i], 0.05)
+        elif impersonated_brand(h):
+            p[i] = max(p[i], 0.9)
+    return p
 
 
 def _logit(p):
@@ -53,13 +66,14 @@ class MultimodalScamDetector:
         has_img = np.array([_has_image(p) for p in img_paths])
         img_X = np.vstack([image_vector(p) for p, h in zip(img_paths, has_img) if h]) if has_img.any() else None
         meta_X = np.vstack([meta_vector(r) for r in df.to_dict("records")])
-        return texts, has_text, img_paths, has_img, img_X, meta_X
+        hosts = [url_host(u) for u in df.get("url", pd.Series([""] * len(df))).fillna("").astype(str)]
+        return texts, has_text, img_paths, has_img, img_X, meta_X, hosts
 
     # ---------- training ----------
     def fit(self, df, y, groups=None):
         """groups: optional template ids, so out-of-fold scores aren't inflated by near-duplicates."""
         y = np.asarray(y).astype(int)
-        texts, has_text, img_paths, has_img, img_X, meta_X = self._extract(df)
+        texts, has_text, img_paths, has_img, img_X, meta_X, hosts = self._extract(df)
         g = None if groups is None else np.asarray(groups)
         if g is None:
             splitter = StratifiedKFold(self.n_folds, shuffle=True, random_state=self.random_state)
@@ -67,7 +81,7 @@ class MultimodalScamDetector:
         else:
             splitter = StratifiedGroupKFold(self.n_folds, shuffle=True, random_state=self.random_state)
             cv = lambda idx: list(splitter.split(idx, y[idx], g[idx]))
-        oof = np.full((len(y), 3), 0.5)
+        oof = np.full((len(y), len(MODALITIES)), 0.5)
 
         self.text_model_ = make_pipeline(TextFeaturizer(),
                                          LogisticRegression(C=4, max_iter=2000, class_weight="balanced"))
@@ -93,7 +107,22 @@ class MultimodalScamDetector:
         oof[:, 2] = cross_val_predict(self.meta_model_, meta_X, y, cv=cv(np.arange(len(y))), method="predict_proba")[:, 1]
         self.meta_model_.fit(meta_X, y)
 
-        present = np.column_stack([has_text, has_img, np.ones(len(y), bool)])
+        # character n-grams of the domain: catches look-alikes (myetherwallel) and lure words (trust-trade)
+        has_url = np.array([h != "" for h in hosts])
+        self.url_model_ = None
+        if has_url.sum() >= 2 * self.n_folds and len(np.unique(y[has_url])) == 2:
+            self.url_model_ = make_pipeline(
+                TfidfVectorizer(analyzer="char", ngram_range=(2, 5), min_df=2, sublinear_tf=True),
+                LogisticRegression(C=2, max_iter=2000, class_weight="balanced"))
+            u_idx = np.nonzero(has_url)[0]
+            ux = [hosts[i] for i in u_idx]
+            oof[u_idx, 3] = _url_rules(ux, cross_val_predict(self.url_model_, ux, y[u_idx], cv=cv(u_idx),
+                                                             method="predict_proba")[:, 1])
+            self.url_model_.fit(ux, y[u_idx])
+        else:
+            has_url[:] = False
+
+        present = np.column_stack([has_text, has_img, np.ones(len(y), bool), has_url])
         Z, yz = self._augment(oof, present, y)
         self.fuser_ = LogisticRegression(max_iter=1000).fit(Z, yz)
         self.oof_ = oof
@@ -116,8 +145,8 @@ class MultimodalScamDetector:
 
     # ---------- inference ----------
     def modality_probs(self, df):
-        texts, has_text, img_paths, has_img, img_X, meta_X = self._extract(df)
-        probs = np.full((len(df), 3), 0.5)
+        texts, has_text, img_paths, has_img, img_X, meta_X, hosts = self._extract(df)
+        probs = np.full((len(df), len(MODALITIES)), 0.5)
         if has_text.any():
             probs[has_text, 0] = self.text_model_.predict_proba([t for t, h in zip(texts, has_text) if h])[:, 1]
         if self.image_model_ is not None and has_img.any():
@@ -125,7 +154,11 @@ class MultimodalScamDetector:
         else:
             has_img = np.zeros(len(df), bool)
         probs[:, 2] = self.meta_model_.predict_proba(meta_X)[:, 1]
-        present = np.column_stack([has_text, has_img, np.ones(len(df), bool)])
+        has_url = np.array([h != "" for h in hosts]) & (getattr(self, "url_model_", None) is not None)
+        if has_url.any():
+            ux = [h for h, k in zip(hosts, has_url) if k]
+            probs[has_url, 3] = _url_rules(ux, self.url_model_.predict_proba(ux)[:, 1])
+        present = np.column_stack([has_text, has_img, np.ones(len(df), bool), has_url])
         return probs, present, texts, img_paths
 
     def predict_proba(self, df):

@@ -11,10 +11,13 @@ SCAM_PATTERNS = {
     "guaranteed_returns": [
         r"guarantee[d]?\s+(returns?|profits?|income)", r"risk[\s-]?free", r"no\s+risk",
         r"100\s?%\s+(safe|secure|guaranteed)", r"zero\s+loss", r"assured\s+(returns?|profits?)",
+        r"(returns?|profits?|payouts?|income)\s+(are\s+)?(guaranteed|assured)", r"principal\s+guaranteed",
     ],
     "unrealistic_returns": [
         r"double\s+your\s+(money|investment)", r"\b\d{1,3}x\s+(returns?|profits?)",
-        r"paisa\s+double", r"\d{2,4}\s?%\s*(daily|weekly|per\s+day|per\s+week|in\s+\d+\s+days?)",
+        r"paisa\s+double", r"\d{2,4}\s?%\s*(daily|weekly|monthly|per\s+(day|week|month)|in\s+\d+\s+(days?|weeks?))",
+        r"\d{2,4}\s?%\s+(daily|weekly|monthly)?\s*(returns?|profits?|gains?)\s+(daily|weekly|monthly|every)",
+        r"\d{2,4}\s?%\s+(monthly|weekly|daily)\s+(returns?|profits?|gains?)", r"\d{3,4}\s?%\s+(apy|returns?)",
         r"earn\s+(rs\.?|₹|\$)?\s?\d[\d,]*\s+(daily|per\s+day|every\s+day)",
     ],
     "urgency": [

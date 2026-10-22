@@ -67,7 +67,7 @@ def main():
             if mask.sum() and len(np.unique(y[mask])) == 2:
                 print(f"{m:>6}: AUC {roc_auc_score(y[mask], probs[mask, j]):.3f}  (n={mask.sum()})")
         w = model.fuser_.coef_[0]
-        print("fuser weights (text, image, meta):", np.round(w[:3], 2))
+        print("fuser weights", {m: round(float(v), 2) for m, v in zip(MODALITIES, w)})
     else:
         _, att = model.predict_with_attention(te)
         print("mean modality attention:", pd.DataFrame(att).mean().round(3).to_dict())

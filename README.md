@@ -7,8 +7,8 @@ and fusing them.
 ```
  text  ──► scam-pattern lexicon + TF-IDF ──► LogisticRegression ─┐
  image ──► OpenCV visual features (+OCR) ──► RandomForest ───────┼─► meta-learner ──► scam probability
- meta  ──► URL / sender / payment features ─► GradientBoosting ──┘   (trained with      + explanation
-                                                                      modality dropout)
+ meta  ──► sender / channel / payment / URL stats ─► GradientBoosting ─┤   (trained with      + explanation
+ url   ──► domain char n-grams + allowlist / impersonation ─► LogReg ──┘    modality dropout)
 ```
 
 | Modality | Patterns recognised |
@@ -16,6 +16,7 @@ and fusing them.
 | Text | guaranteed / risk-free returns, unrealistic % (e.g. "20% daily"), urgency, move to Telegram/WhatsApp, USDT/crypto/forex, registration or withdrawal fees, fake SEBI/RBI authority, romance/"wrong number" lures |
 | Image | green "profit" dominance, rising-chart trend, text-heavy screenshots, near-duplicates of known scam images (perceptual hash), optional OCR text |
 | Metadata | link shorteners, suspicious TLDs, raw-IP links, lure words in domain, new accounts, follower ratio, channel, crypto/gift-card payment |
+| URL | character patterns of the domain (look-alikes such as `myetherwallel`), official-domain allowlist, brand impersonation (`zerodha-profit.in`, `nse-tips-vip.online`) — see `scamdetect/domains.py` |
 
 Two fusion strategies:
 - `stack` (default): stacking ensemble, works when any modality is missing, gives a per-pattern explanation.
@@ -53,15 +54,19 @@ Results (25% held-out groups):
 
 | Metric | Value |
 |---|---|
-| ROC-AUC (all) | 0.984 |
-| Accuracy (all) | 0.930 |
-| Recall on investment-related scams | 0.691 |
-| False-positive rate on legitimate messages | 0.036 |
-| Text-expert AUC | 0.999 |
-| URL/metadata-expert AUC | 0.685 |
+| Metric | Before URL expert | With URL expert |
+|---|---|---|
+| ROC-AUC (all) | 0.984 | 0.997 |
+| Accuracy (all) | 0.930 | 0.981 |
+| Recall on investment-related scams | 0.691 | 0.956 |
+| False-positive rate on legitimate messages | 0.036 | 0.016 |
+| Crypto scam domains caught (CryptoScamDB) | 0.627 | 0.947 |
 
-Caveats: the Shade63 texts are template-based, so the near-perfect text score is optimistic; the
-URL-only rows (domain without message) are the hard part and pull investment recall down.
+Expert AUCs: text 0.999, URL 0.977, sender/channel metadata 0.695.
+
+Caveats: the Shade63 texts are template-based, so the near-perfect text score is optimistic. Scam
+domains (CryptoScamDB, mostly 2017–2020) and legitimate ones (Tranco) come from different sources,
+so part of the URL score may reflect source style; the allowlist protects real brokers and banks.
 
 ## Using your own data
 Put rows in `data/raw/my_samples.csv` (merged automatically) or train on any CSV with these columns
